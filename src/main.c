@@ -111,9 +111,9 @@ int bootsoundThread(SceSize argc, void* argv) {
 
 	while(!shellinit) {
 		sceClibPrintf("bootsound, wait for shell init\n");
-		sceKernelDelayThread(1000 * 1000 * 1);
+		sceKernelDelayThread(1000 * 1000 * 1 / 10);
 	}
-	sceKernelDelayThread(1000 * 1000 * 1);
+	sceKernelDelayThread(1000 * 1000 * 1 / 10);
 
 	sceClibPrintf("bootsound shell init detected\n");
 
@@ -229,9 +229,10 @@ int bootsoundThread(SceSize argc, void* argv) {
 static SceUID bridge_hook = -1;
 static tai_hook_ref_t bridge_ref;
 int bridge_patched(int a1) {
+	int ret = TAI_CONTINUE(int, bridge_ref, a1);
 	shellinit = 1;
 	sceClibPrintf("shell initialization complete\n");
-	return TAI_CONTINUE(int, bridge_ref, a1);
+	return ret;
 }
 
 void _start() __attribute__ ((weak, alias ("module_start")));
