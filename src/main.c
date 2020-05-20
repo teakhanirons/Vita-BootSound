@@ -219,8 +219,9 @@ int bootsoundThread(SceSize argc, void* argv) {
 
  	playSound(wav_addr + dataOffset + 8);
 
-    sceKernelFreeMemBlock(uid);
-    sceClibPrintf("release memory okay!\n");
+    int ret;
+    ret = sceKernelFreeMemBlock(uid);
+    sceClibPrintf("release memory 0x%x\n", ret);
 
 	return 1;
 }
