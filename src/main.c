@@ -45,6 +45,7 @@ struct HEADER {
 #define ALIGN(x, a) (((x) + ((a) - 1)) & ~((a) - 1))
 
 int shellinit = 0;
+int bgmBusy = 0;
 struct HEADER header;
 
 static int offset(void *mem_base, char *needle) {
@@ -60,6 +61,28 @@ static int offset(void *mem_base, char *needle) {
 			return mem - mem_base;
 		} else mem += 1;
 	}
+}
+
+static SceUID bridge_hook = -1;
+static tai_hook_ref_t bridge_ref;
+int bridge_patched(int a1) {
+	int ret = TAI_CONTINUE(int, bridge_ref, a1);
+	shellinit = 1;
+	sceClibPrintf("shell initialization complete\n");
+	return ret;
+}
+
+static SceUID open_hook = -1;
+static tai_hook_ref_t open_ref;
+int open_patched(SceAudioOutPortType type, int len, int freq, SceAudioOutMode mode)	{
+	if(type == SCE_AUDIO_OUT_PORT_TYPE_BGM) {
+		while(bgmBusy) {
+			sceClibPrintf("bgm busy, waiting\n");
+			sceKernelDelayThread(1 * 1000 * 1000);
+		}
+		sceClibPrintf("bgm opened, continuing\n");
+	}
+	return TAI_CONTINUE(int, open_ref, type, len, freq, mode);
 }
 
 static void playSound(void *mem_base) {
@@ -90,6 +113,7 @@ static void playSound(void *mem_base) {
 			sceClibPrintf("port open error 0x%x\n", port);
 			return;
 		}
+		bgmBusy = 1;
 		int ret;
 		ret = sceAudioOutOutput(port, temp_mem);
 		sceClibPrintf("out1 0x%x\n", ret);
@@ -104,6 +128,7 @@ static void playSound(void *mem_base) {
 	    else sample_len = ALIGN(header.num_samples, 64) - count;
 	    sceClibPrintf("temporary variables end: %i %i %i %i\n", temp_mem, count, sample_len, ALIGN(header.num_samples, 64) - count);
 	}
+	bgmBusy = 0;
 	return;
 }
 
@@ -218,7 +243,8 @@ int bootsoundThread(SceSize argc, void* argv) {
  	sceClibPrintf("Approx.Duration in seconds=%f\n", duration_in_seconds);
 
  	playSound(wav_addr + dataOffset + 8);
-
+	if (open_hook >= 0) taiHookRelease(open_hook, bridge_ref);
+	sceClibPrintf("release open hook\n");
     int ret;
     ret = sceKernelFreeMemBlock(uid);
     sceClibPrintf("release memory 0x%x\n", ret);
@@ -226,26 +252,14 @@ int bootsoundThread(SceSize argc, void* argv) {
 	return 1;
 }
 
-static SceUID bridge_hook = -1;
-static tai_hook_ref_t bridge_ref;
-int bridge_patched(int a1) {
-	int ret = TAI_CONTINUE(int, bridge_ref, a1);
-	shellinit = 1;
-	sceClibPrintf("shell initialization complete\n");
-	return ret;
-}
-
 void _start() __attribute__ ((weak, alias ("module_start")));
 int module_start(SceSize argc, const void *args){
 		sceClibPrintf("\nbootsound by Team CBPS\n");
-
-		// vshKernelSendSysEvent
-		bridge_hook = taiHookFunctionImport(&bridge_ref,
-		TAI_MAIN_MODULE,
-		TAI_ANY_LIBRARY,
-		0x71D9DB5C,
-		bridge_patched);
+		bridge_hook = taiHookFunctionImport(&bridge_ref, TAI_MAIN_MODULE, TAI_ANY_LIBRARY, 0x71D9DB5C, bridge_patched);
 		sceClibPrintf("bridge_hook = %i\n", bridge_hook);
+
+		open_hook = taiHookFunctionImport(&open_ref, TAI_MAIN_MODULE, TAI_ANY_LIBRARY, 0x5BC341E4, open_patched);
+		sceClibPrintf("open_hook = %i\n", open_hook);
 
 		SceUID thid = sceKernelCreateThread("bootsound_thread", bootsoundThread, 191, 0x4000, 0, 0, NULL);
 		sceKernelStartThread(thid, 0, NULL);
@@ -256,5 +270,6 @@ int module_start(SceSize argc, const void *args){
 
 int module_stop(SceSize argc, const void *args){
 	if (bridge_hook >= 0) taiHookRelease(bridge_hook, bridge_ref);
+	sceClibPrintf("release bridge hook\n");
 	return SCE_KERNEL_STOP_SUCCESS;
 }
